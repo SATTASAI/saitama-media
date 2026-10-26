@@ -8,7 +8,7 @@ export function json(value,status=200,extra={}) {return new Response(JSON.string
 function equal(a,b) {const x=Buffer.from(a||''),y=Buffer.from(b||'');return x.length===y.length&&timingSafeEqual(x,y);}
 function cookie(name,value,age,secure) {return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${age}${secure?'; Secure':''}`;}
 function cookies(req) {return Object.fromEntries((req.headers.get('Cookie')||'').split(';').map(s=>s.trim().split('=')).filter(p=>p.length===2));}
-async function readBody(req) {
+export async function readBody(req) {
   if(!req.body)throw problem('รูปแบบ JSON ไม่ถูกต้อง');
   const reader=req.body.getReader(),chunks=[];let size=0;
   try {while(true){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>22*1024*1024){await reader.cancel();throw problem('ข้อมูลเกินขนาดที่รองรับ',413);}chunks.push(value);}}finally{reader.releaseLock();}
@@ -52,6 +52,7 @@ export class LibraryApplication {
   }
   async fetch(req) {
     try{return await this.route(req);}catch(e){return json({error:e.status?e.message:'ระบบทำรายการไม่สำเร็จ กรุณาตรวจสอบการตั้งค่าและลองใหม่'},e.status||500);}
+    finally {if(req.body&&!req.bodyUsed)await req.body.cancel().catch(()=>{});}
   }
   async route(req) {
     const env=this.env,base=baseURL(env,req),secure=base.startsWith('https:'),url=new URL(req.url),path=url.pathname;
