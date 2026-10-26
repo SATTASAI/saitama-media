@@ -1,0 +1,34 @@
+{
+  "openapi": "3.1.0",
+  "info": {"title": "คลังสื่อครู", "version": "1.0.0", "description": "บันทึกสื่อที่ผู้ใช้สั่งสร้างลง Google Drive ส่วนตัว พร้อมตั้งชื่อและจัดหมวดหมู่"},
+  "servers": [{"url": "https://YOUR-DOMAIN.example"}],
+  "paths": {
+    "/api/ingest": {
+      "post": {
+        "operationId": "saveTeachingMaterial",
+        "summary": "บันทึกสื่อที่สร้างเสร็จแล้วลงคลังของเจ้าของระบบ",
+        "description": "ใช้เมื่อผู้ใช้ขอสร้างและบันทึกสื่อ ส่งเนื้อหาจริงใน text_content เป็น HTML, Markdown หรือ TXT ระบบไม่แปลงเป็น PDF ส่ง request_id เดิมพร้อมเนื้อหาเดิมเมื่อตรวจสอบคำขอที่ผลไม่แน่นอน และใช้ค่าใหม่เมื่อสร้างสื่อใหม่ ห้ามบอกว่าบันทึกสำเร็จก่อน API คืน file.id",
+        "security": [{"bearerAuth": []}],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {
+          "type": "object", "required": ["request_id", "name", "text_content"], "additionalProperties": false,
+          "properties": {
+            "request_id": {"type": "string", "pattern": "^[a-zA-Z0-9_-]{16,80}$", "description": "ค่าเฉพาะคำขอ เช่น UUID ใช้ซ้ำเฉพาะตอนตรวจสอบ/ส่งซ้ำของสื่อเดียวกัน"},
+            "name": {"type": "string", "maxLength": 250, "description": "ชื่อสื่อตามเนื้อหา ต้องลงท้าย .html, .md หรือ .txt"},
+            "text_content": {"type": "string", "maxLength": 200000, "description": "เนื้อหาสื่อทั้งหมด ใช้ HTML พร้อม CSS สำหรับงานจัดหน้า ห้ามส่งเพียงลิงก์ดาวน์โหลดหรือข้อความอ้างว่ามีไฟล์"},
+            "metadata": {"type": "object", "additionalProperties": false, "properties": {
+              "title": {"type": "string", "maxLength": 180},
+              "subject": {"type": "string", "enum": ["คณิตศาสตร์", "ภาษาไทย", "ภาษาอังกฤษ", "วิทยาศาสตร์", "สังคมศึกษา", "ศิลปะ", "สุขศึกษา", "การงานอาชีพ", "ทั่วไป"]},
+              "grade": {"type": "string", "enum": ["อนุบาล", "ป.1", "ป.2", "ป.3", "ป.4", "ป.5", "ป.6", "ม.1", "ม.2", "ม.3", "ม.4", "ม.5", "ม.6", "ไม่ระบุชั้น"]},
+              "type": {"type": "string", "enum": ["ใบงาน", "สื่อการสอน", "แบบฝึกหัด"]}
+            }}
+          }
+        }}}},
+        "responses": {
+          "200": {"description": "บันทึกสำเร็จ หรือพบไฟล์เดิมของ request_id นี้", "content": {"application/json": {"schema": {"type": "object", "properties": {"file": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "webViewLink": {"type": "string"}, "duplicate": {"type": "boolean"}}}}}}}},
+          "400": {"description": "ข้อมูลไม่ถูกต้อง"}, "401": {"description": "API key ไม่ถูกต้อง หรือยังไม่เชื่อม Google Drive"}, "409": {"description": "request_id ซ้ำแต่เนื้อหาต่างกัน"}, "502": {"description": "Google Drive ยังไม่ยืนยันผล ตรวจสอบก่อนส่งซ้ำ"}
+        }
+      }
+    }
+  },
+  "components": {"securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}}}
+}
