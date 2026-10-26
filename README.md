@@ -13,6 +13,81 @@
 - รับสื่อจาก Custom GPT ผ่าน Action พร้อมตรวจคำขอซ้ำด้วย request_id
 - ไฟล์ที่อยู่ใน Drive มาก่อนและไม่ได้สร้างผ่านระบบนี้จะไม่ถูกรวมในคลังโดยอัตโนมัติ
 
+## Cloudflare Workers: saitama-media
+
+โครงการรองรับ **Cloudflare Workers + Static Assets + SQLite-backed Durable Object** โดยตรง ตั้ง `keep_vars: true` เพื่อคง Variables ที่ตั้งผ่าน Dashboard ไว้เมื่อ deploy
+
+ชื่อ Worker ใน `wrangler.jsonc` คือ `saitama-media` ตรงกับ Worker ที่สร้างไว้แล้ว ใช้ repository นี้ deploy เข้า Worker เดิมได้ ไม่ต้องสร้าง Worker ใหม่หรือ D1
+
+- Static Assets ให้บริการหน้าเว็บจาก `public/`
+- Durable Object binding `LIBRARY` ถูกสร้างผ่าน migration ใน `wrangler.jsonc` ตอน deploy
+- Durable Object เก็บ refresh token ของ Google ที่เข้ารหัสแล้ว พร้อม OAuth state และ session จึงไม่ต้องใช้ persistent disk
+- ไฟล์สื่อและข้อมูลหมวดหมู่ยังอยู่ใน Google Drive
+- โทเคนและ session ไม่หายเมื่อ Worker restart; คิวอัปโหลดใช้ Durable Object เดียวเพื่อจัดลำดับคำขอ
+
+### Deploy ผ่าน GitHub ที่ Cloudflare Dashboard
+
+1. เปิด **Workers & Pages → saitama-media → Settings → Builds** แล้วเชื่อม repository `SATTASAI/saitama-media` เลือก branch `main` (ชื่อเมนูอาจเปลี่ยนตาม Dashboard)
+2. Root directory: `/` · Build command: `npm run build` · Deploy command: `npx wrangler deploy`
+3. บันทึกแล้วสั่ง build/deploy โค้ดจะสร้าง binding และ migration ให้จาก `wrangler.jsonc` อย่าใช้ Pages หรืออัปเฉพาะโฟลเดอร์ `public` เพราะจะไม่มี API
+4. เปิด URL `https://saitama-media.<subdomain-บัญชีคุณ>.workers.dev` ของ Worker เดิม
+5. ตั้ง Variables and Secrets ตามตาราง แล้ว Deploy อีกครั้งเพื่อให้ค่ามีผล
+
+### ค่าที่ต้องตั้งใน Worker
+
+ใน **saitama-media → Settings → Variables and Secrets**:
+
+| ชื่อ | ชนิด | ค่า |
+| --- | --- | --- |
+| `BASE_URL` | Variable | URL HTTPS ของ Worker จริง ไม่มี `/` ท้าย เช่น `https://saitama-media.your-account.workers.dev` |
+| `ADMIN_EMAIL` | Variable | อีเมล Google เจ้าของคลัง |
+| `GOOGLE_CLIENT_ID` | Secret | OAuth Client ID ชนิด Web application |
+| `GOOGLE_CLIENT_SECRET` | Secret | OAuth Client Secret |
+| `TOKEN_ENCRYPTION_KEY` | Secret | ค่าสุ่ม hex 64 ตัว ใช้เข้ารหัส refresh token |
+| `INGEST_API_KEY` | Secret | ค่าสุ่มอีกค่าหนึ่ง อย่างน้อย 32 ตัว สำหรับ GPT Action |
+
+สร้างค่าสุ่มบนเครื่องตัวเอง **สองครั้งแยกกัน**:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+ห้ามใส่ Client Secret, คีย์ หรือ refresh token ลง GitHub หรือส่งในห้องแชต ไม่ต้องตั้ง `PORT` หรือ `DATA_DIR` บน Workers
+
+### Google OAuth สำหรับ Worker ของคุณ
+
+ตั้ง Authorized redirect URI ให้ตรงกับ URL จริงของ Worker:
+
+```text
+https://saitama-media.<subdomain-บัญชีคุณ>.workers.dev/oauth/callback
+```
+
+รายละเอียดการสร้าง OAuth Client อยู่ในหัวข้อถัดไป เมื่อตั้งครบแล้วเปิดเว็บและกด **เชื่อม Google Drive** ด้วยบัญชี `ADMIN_EMAIL` โฟลเดอร์ “คลังสื่อครู” จะถูกสร้างเมื่ออัปโหลดไฟล์ชิ้นแรก
+
+### Deploy ด้วย CLI (อีกทางเลือกหนึ่ง)
+
+```bash
+npm ci
+npx wrangler login
+npm run deploy
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
+npx wrangler secret put TOKEN_ENCRYPTION_KEY
+npx wrangler secret put INGEST_API_KEY
+```
+
+ตั้ง `BASE_URL` และ `ADMIN_EMAIL` ผ่าน Dashboard แล้ว Deploy/บันทึกให้ค่ามีผล การ deploy ใช้บัญชี Cloudflare เดียวกับ Worker ที่สร้างไว้ ดูชื่อ Worker และ Durable Object binding ในผลลัพธ์ Wrangler
+
+### เปิด Workers บนเครื่องตัวเอง
+
+```bash
+npm ci
+cp .dev.vars.example .dev.vars
+npm run dev
+```
+
+ตั้งค่าจริงใน `.dev.vars` แล้วเพิ่ม Google redirect URI `http://localhost:8787/oauth/callback` ข้อมูลจำลองในเครื่องอยู่ใน `.wrangler/` และไม่ปะปนกับ production
+
 ## 1. ตั้งค่า Google ครั้งแรก
 
 1. สร้างหรือเลือกโปรเจกต์ใน [Google Cloud Console](https://console.cloud.google.com/)
@@ -46,20 +121,11 @@ npm start
 
 หน้าเว็บเปิดดูได้ก่อนตั้งค่า แต่ยังอ่านหรืออัปโหลดไฟล์จริงไม่ได้จนกว่าจะเชื่อม Google สำเร็จ
 
-## 3. เปิดออนไลน์
+## 3. โฮสต์แบบ Node.js (ทางเลือก)
 
-โฮสต์ต้องรัน Node.js ได้ เช่น Render, Railway, VPS หรือบริการ container; **GitHub Pages รัน backend นี้ไม่ได้**
+`npm start` ยังรัน Node.js server เดิมได้ แต่ **บน Cloudflare ใช้ `npm run deploy` ตามคู่มือด้านบน** ไม่ใช้ Docker หรือ `node server.mjs`
 
-- Build command: ไม่จำเป็น (ไม่มี dependency)
-- Start command: `node server.mjs`
-- ตั้ง `BASE_URL` เป็น URL HTTPS ของระบบโดยไม่มี `/` ท้ายสุด
-- ตั้ง Google OAuth redirect URI ให้ตรงกับ URL ออนไลน์
-- ตั้งค่า environment ทั้งหมดตาม `.env.example` ผ่านระบบ secrets ของโฮสต์
-- ต้องมี **persistent disk** ต่อที่ `DATA_DIR` (เช่น `/app/data`) เพื่อเก็บ refresh token ที่เข้ารหัสแล้ว หากไม่มี disk จะต้องเชื่อม Google ใหม่หลัง restart/redeploy
-- ใช้ **1 instance**: session, OAuth state และคิวอัปโหลดอยู่ในหน่วยความจำ ยังไม่รองรับหลาย replica การ restart ทำให้ออกจากระบบเว็บไซต์แต่เชื่อม Google ต่อได้ถ้ามี persistent disk
-- reverse proxy ต้องส่ง HTTPS ให้ผู้ใช้ และรองรับ request body อย่างน้อย 22 MB; ภายใน container ใช้ port `PORT`
-
-มี Dockerfile ให้ แต่ต้องต่อ persistent volume ที่ `/app/data` และใส่ค่า environment เอง
+หากเลือกโฮสต์ Node.js แทน Workers ต้องมี persistent disk ที่ `DATA_DIR` ใช้ 1 instance และตั้ง `.env` ตาม `.env.example` ส่วน Workers เก็บข้อมูลผ่าน Durable Object ให้แล้ว
 
 ## 4. เชื่อมกับ ChatGPT ให้สร้างแล้วบันทึก
 
@@ -96,12 +162,12 @@ API key ให้สิทธิ์เขียนเข้าคลังเจ
 ## การรักษาข้อมูล
 
 - Client Secret, API key และ refresh token ไม่ถูกส่งไป browser
-- refresh token เข้ารหัส AES-256-GCM ก่อนเก็บใน `data/google.enc` และไม่รวมใน Git
+- refresh token เข้ารหัส AES-256-GCM ก่อนเก็บใน Durable Object (Workers) หรือ `data/google.enc` (Node.js) และไม่รวมใน Git
 - session เป็น HttpOnly cookie มีอายุ 8 ชั่วโมง; ออนไลน์ใช้ Secure cookie
 - ตรวจ OAuth state และอีเมลเจ้าของก่อนเชื่อม Drive
 - การเขียนจากเว็บต้องมี session และ Origin ตรงกับ BASE_URL; Action ใช้ Bearer key
 - ไม่แชร์ไฟล์ Drive เป็นสาธารณะ ไม่ลบไฟล์ และไม่โหลด HTML ที่อัปโหลดมาแสดงใน origin ของเว็บไซต์
-- สำรอง `TOKEN_ENCRYPTION_KEY` และ persistent disk แยกจาก GitHub; เปลี่ยนคีย์แล้วต้องเชื่อม Google ใหม่
+- สำรอง `TOKEN_ENCRYPTION_KEY` แยกจาก GitHub; เปลี่ยนคีย์แล้วต้องเชื่อม Google ใหม่ อย่าลบ Durable Object storage หรือเปลี่ยนชื่อ object `owner-library-v1` หากต้องการคงการเชื่อมต่อเดิม
 
 ## ตรวจสอบ
 
@@ -109,6 +175,7 @@ API key ให้สิทธิ์เขียนเข้าคลังเจ
 npm test
 node --check server.mjs
 node --check public/app.js
+npm run build
 ```
 
-Tests ตรวจชื่อ/หมวดหมู่ การตรวจ payload และ HTTP authorization โดยไม่ใช้บัญชีจริง การเชื่อม Google OAuth, อัปโหลด Drive จริง และเรียก GPT Action ต้องทดสอบหลังตั้งค่า credentials และ URL ของคุณ
+Tests ตรวจชื่อ/หมวดหมู่ payload, HTTP authorization, OAuth/session ของ Workers และการอัปโหลดซ้ำหลังเริ่ม instance ใหม่ โดยจำลอง Google API ไม่ใช้บัญชีจริง การเชื่อม Google OAuth, อัปโหลด Drive จริง และเรียก GPT Action ต้องทดสอบหลังตั้งค่า credentials และ URL ของคุณ
