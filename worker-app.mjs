@@ -1,6 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { randomBytes, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
-import { subjects, types, classify } from './library.mjs';
+import { subjects, types, analyzeFile } from './library.mjs';
 import { createDriveClient } from './drive-client.mjs';
 
 const problem=(message,status=400)=>Object.assign(new Error(message),{status});
@@ -96,7 +96,7 @@ export class LibraryApplication {
       if(!signedIn)throw problem('กรุณาเข้าสู่ระบบด้วย Google ก่อน',401);
       if(req.method==='POST'&&req.headers.get('Origin')!==base)throw problem('Origin ไม่ถูกต้อง',403);
       if(req.method==='GET'&&path==='/api/files')return json({files:await this.drive.listFiles()});
-      if(req.method==='POST'&&path==='/api/classify'){const d=await readBody(req);if(typeof d.name!=='string')throw problem('ชื่อไฟล์ไม่ถูกต้อง');return json(classify(d.name));}
+      if(req.method==='POST'&&path==='/api/classify'){const d=await readBody(req);if(typeof d.name!=='string')throw problem('ชื่อไฟล์ไม่ถูกต้อง');try{return json(analyzeFile(d));}catch(e){throw problem(e.message);}}
       if(req.method==='POST'&&path==='/api/upload'){const d=await readBody(req);checkRequestId(d);return json({file:await this.enqueue(()=>this.drive.upload(d,d.request_id))},201);}
       if(req.method==='POST'&&path==='/api/logout'){await this.store.delete('session:'+sid);return json({ok:true},200,{'Set-Cookie':cookie('kru_session','',0,secure)});}
     }

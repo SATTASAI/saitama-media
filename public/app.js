@@ -6,7 +6,7 @@ function applyTheme(){document.documentElement.dataset.theme=themePreference==='
 applyTheme();colorScheme.addEventListener('change',()=>{if(themePreference==='system')applyTheme();});
 $('theme-select').value=themePreference;
 $('theme-select').addEventListener('change',e=>{themePreference=e.target.value;try{localStorage.setItem('kru-theme',themePreference);}catch{}applyTheme();});
-const state = { status:null, files:[], category:'ทั้งหมด', queue:[], busy:false, loading:false, readFailed:false };
+const state = { status:null, files:[], category:'ทั้งหมด', queue:[], busy:false, loading:false, readFailed:false, page:0 };
 const subjects = ['คณิตศาสตร์','ภาษาไทย','ภาษาอังกฤษ','วิทยาศาสตร์','สังคมศึกษา','ศิลปะ','สุขศึกษา','การงานอาชีพ','ทั่วไป'];
 const grades = ['อนุบาล',...Array.from({length:6},(_,i)=>`ป.${i+1}`),...Array.from({length:6},(_,i)=>`ม.${i+1}`),'ไม่ระบุชั้น'];
 const types = ['ใบงาน','สื่อการสอน','แบบฝึกหัด'];
@@ -31,29 +31,54 @@ function updateStatus(){
   $('setup-connect').textContent=ready?'เชื่อม Google ใหม่':'เชื่อม Google Drive →';
   $('logout').hidden=!s?.signedIn;
 }
-function fileMeta(f){return {title:f.appProperties?.title||f.name,subject:f.appProperties?.subject||'ทั่วไป',grade:f.appProperties?.grade||'ไม่ระบุชั้น',type:f.appProperties?.type||'ใบงาน'};}
+function fileMeta(f){return {title:f.appProperties?.title||f.name,subject:f.appProperties?.subject||'ทั่วไป',grade:f.appProperties?.grade||'ไม่ระบุชั้น',type:f.appProperties?.type||(/\.(pptx|html|png|jpe?g|webp)$/i.test(f.name)?'สื่อการสอน':/แบบฝึก|exercise|practice/i.test(f.name)?'แบบฝึกหัด':'ใบงาน')};}
+function updatePages(){
+  const total=$('file-grid').children.length;
+  $('page-status').textContent=`หน้า ${total?state.page+1:0} / ${total}`;
+  $('page-prev').disabled=state.page<=0;$('page-next').disabled=state.page>=total-1;
+}
+function goPage(delta){
+  state.page=Math.max(0,Math.min($('file-grid').children.length-1,state.page+delta));updatePages();
+  $('file-grid').scrollTo({left:state.page*$('file-grid').clientWidth,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
+}
+$('page-prev').addEventListener('click',()=>goPage(-1));$('page-next').addEventListener('click',()=>goPage(1));
+$('file-grid').addEventListener('keydown',e=>{if(e.target!==$('file-grid'))return;if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();goPage(e.key==='ArrowLeft'?-1:1);}});
+let scrollTimer;
+$('file-grid').addEventListener('scroll',()=>{clearTimeout(scrollTimer);scrollTimer=setTimeout(()=>{state.page=Math.round($('file-grid').scrollLeft/Math.max(1,$('file-grid').clientWidth));updatePages();},120);});
+let resizeTimer,layoutWidth=window.innerWidth;
+window.addEventListener('resize',()=>{if(window.innerWidth===layoutWidth){$('file-grid').scrollLeft=state.page*$('file-grid').clientWidth;return;}layoutWidth=window.innerWidth;clearTimeout(resizeTimer);resizeTimer=setTimeout(render,150);});
 function render(){
   const files=state.files,query=$('search').value.trim().toLocaleLowerCase('th');
   $('stat-total').textContent=files.length;$('all-count').textContent=files.length;
   ['worksheet','media','exercise'].forEach((key,i)=>$('stat-'+key).textContent=files.filter(f=>fileMeta(f).type===types[i]).length);
-  const filtered=files.filter(f=>{const m=fileMeta(f);return(state.category==='ทั้งหมด'||m.type===state.category)&&(!$('subject-filter').value||m.subject===$('subject-filter').value)&&(!$('grade-filter').value||m.grade===$('grade-filter').value)&&(!query||[f.name,...Object.values(m)].join(' ').toLocaleLowerCase('th').includes(query));});
+  const format=$('format-filter').value;
+  const filtered=files.filter(f=>{const m=fileMeta(f);return(state.category==='ทั้งหมด'||m.type===state.category)&&(!$('subject-filter').value||m.subject===$('subject-filter').value)&&(!$('grade-filter').value||m.grade===$('grade-filter').value)&&(!format||(format==='image'?/\.(png|jpe?g|webp)$/i.test(f.name):format==='text'?/\.(txt|md|html)$/i.test(f.name):f.name.toLowerCase().endsWith('.'+format)))&&(!query||[f.name,...Object.values(m)].join(' ').toLocaleLowerCase('th').includes(query));});
   filtered.sort((a,b)=>$('sort').value==='name'?fileMeta(a).title.localeCompare(fileMeta(b).title,'th'):$('sort').value==='oldest'?new Date(a.createdTime)-new Date(b.createdTime):new Date(b.createdTime)-new Date(a.createdTime));
   const category=state.category==='ทั้งหมด'?'สื่อทั้งหมด':state.category;
   $('section-title').firstChild.textContent=category+' ';$('breadcrumb').textContent=category;$('result-count').textContent=filtered.length;
   $('file-grid').replaceChildren();
-  filtered.forEach(f=>{
+  const perPage=window.matchMedia('(max-width:600px)').matches?1:window.matchMedia('(max-width:1100px)').matches?4:6;
+  state.page=Math.min(state.page,Math.max(0,Math.ceil(filtered.length/perPage)-1));
+  let page;
+  filtered.forEach((f,index)=>{
+    if(index%perPage===0){page=el('div','file-page');page.setAttribute('role','group');page.setAttribute('aria-label','หน้าที่ '+(Math.floor(index/perPage)+1));$('file-grid').append(page);}
     const m=fileMeta(f),card=el('article','file-card'),preview=el('div','file-preview'),doc=el('div','doc',m.type==='สื่อการสอน'?'◈':m.type==='แบบฝึกหัด'?'✎':'▧');
-    preview.append(doc,el('span','extension',f.name.split('.').pop().toUpperCase()));
+    preview.dataset.type=m.type;preview.setAttribute('aria-hidden','true');
+    const sheet=el('div','preview-sheet');sheet.append(doc,el('span','preview-title',m.title),el('span','preview-lines',''));preview.append(sheet,el('span','extension',f.name.split('.').pop().toUpperCase()),el('span','preview-kind',m.type));
     const body=el('div','file-body');body.append(el('h3',null,m.title));const tags=el('div','file-meta');[m.subject,m.grade,m.type].forEach(v=>tags.append(el('span',null,v)));body.append(tags);
     const bottom=el('div','file-bottom');bottom.append(el('span',null,new Date(f.createdTime).toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'numeric'})));
-    const link=el('a',null,'เปิดใน Drive ↗');link.href='https://drive.google.com/file/d/'+encodeURIComponent(f.id)+'/view';link.target='_blank';link.rel='noopener noreferrer';bottom.append(link);body.append(bottom);card.append(preview,body);$('file-grid').append(card);
+    const link=el('a',null,'เปิดใน Drive ↗');link.href='https://drive.google.com/file/d/'+encodeURIComponent(f.id)+'/view';link.target='_blank';link.rel='noopener noreferrer';bottom.append(link);body.append(bottom);card.append(preview,body);page.append(card);
   });
+  $('file-grid').hidden=!filtered.length;
+  $('carousel-nav').hidden=!filtered.length;
+  updatePages();
+  $('file-grid').scrollLeft=state.page*$('file-grid').clientWidth;
   $('empty-state').hidden=filtered.length>0;
   $('empty-action').hidden=false;
   if(state.loading){$('empty-title').textContent='กำลังอ่านคลังสื่อ…';$('empty-description').textContent='กำลังโหลดรายการจาก Google Drive';$('empty-action').hidden=true;}
   else if(state.readFailed && !files.length){$('empty-title').textContent='ยังอ่านคลังสื่อไม่ได้';$('empty-description').textContent='ตรวจสอบข้อความแจ้งเตือน แล้วกดรีเฟรชเพื่อลองอ่านใหม่';$('empty-action').textContent='รีเฟรชรายการ';}
   else if(!state.status?.signedIn){$('empty-title').textContent='เริ่มต้นคลังสื่อของคุณ';$('empty-description').textContent='เชื่อม Google Drive แล้วอัปโหลดสื่อชิ้นแรก เราจะช่วยตั้งชื่อและจัดให้เป็นหมวดหมู่';$('empty-action').textContent='เชื่อม Google Drive →';}
-  else if(!files.length){$('empty-title').textContent='พร้อมเก็บสื่อชิ้นแรกแล้ว';$('empty-description').textContent='เลือกไฟล์จากเครื่อง แล้วตรวจชื่อและหมวดหมู่ก่อนบันทึก';$('empty-action').textContent='＋ อัปโหลดสื่อชิ้นแรก';}
+  else if(!files.length){$('empty-title').textContent='พร้อมเก็บสื่อชิ้นแรกแล้ว';$('empty-description').textContent='เลือกไฟล์จากเครื่อง แล้วตรวจชื่อและหมวดหมู่ก่อนบันทึก';$('empty-action').textContent='+ อัปโหลดสื่อชิ้นแรก';}
   else{$('empty-title').textContent='ยังไม่พบสื่อที่ค้นหา';$('empty-description').textContent='ลองเปลี่ยนคำค้น วิชา หรือระดับชั้น';$('empty-action').textContent='ล้างตัวกรอง';}
 }
 async function refresh(){
@@ -78,8 +103,8 @@ async function addFiles(list){
     if(!/\.(pdf|docx|pptx|xlsx|png|jpe?g|webp|txt|md|html)$/i.test(file.name)){rejected.push('ไม่รองรับไฟล์ '+file.name);continue;}
     if(!file.size){rejected.push('ไฟล์ '+file.name+' ว่างเปล่า');continue;}
     try{
-      const meta=await api('/api/classify',{name:file.name});
-      state.queue.push({file,meta,id:crypto.randomUUID(),status:'พร้อมอัปโหลด',done:false,uncertain:false});
+      const {analysis,...meta}=await api('/api/classify',{name:file.name,content_base64:await asBase64(file)});
+      state.queue.push({file,meta,analysis,id:crypto.randomUUID(),status:'พร้อมอัปโหลด',done:false,uncertain:false});
     }catch(e){rejected.push(file.name+': '+e.message);}
   }
   state.adding=false;$('upload-error').hidden=!rejected.length;$('upload-error').textContent=rejected.join(' · ');
@@ -97,13 +122,16 @@ function renderQueue(){
       input.value=item.meta[key];input.disabled=state.busy||item.done||item.uncertain;
       input.addEventListener('change',()=>{item.meta[key]=input.value;});wrap.append(input);fields.append(wrap);
     }
-    row.append(fields,el('p','upload-progress',item.status));$('upload-list').append(row);
+    const suggestion=el('p','analysis-note',item.analysis?.detail||'แนะนำจากชื่อไฟล์');
+    suggestion.prepend(el('span','analysis-badge',item.analysis?.source==='content'?'✧ วิเคราะห์เนื้อหา':'◈ วิเคราะห์ชื่อไฟล์'));
+    row.append(suggestion,fields,el('p','upload-progress',item.status));$('upload-list').append(row);
   }
   $('submit-upload').disabled=state.busy||state.adding||!state.queue.some(i=>!i.done);
   $('submit-upload').textContent=state.busy?'กำลังอัปโหลด…':'อัปโหลดเข้า Google Drive';
   $('queue-summary').textContent=state.adding?'กำลังตรวจสอบไฟล์…':state.queue.length+' ไฟล์ · บันทึกแล้ว '+state.queue.filter(i=>i.done).length+' · รอส่ง '+state.queue.filter(i=>!i.done).length;
-  $('file-input').disabled=state.busy||state.adding;$('cancel-upload').disabled=state.busy;
-  $('upload-dialog').querySelector('.dialog-heading .close-dialog').disabled=state.busy;
+  $('file-input').disabled=state.busy||state.adding;
+  $('upload-dialog').querySelector('.dialog-heading .close-dialog').disabled=state.busy||state.adding;
+  $('cancel-upload').disabled=state.busy||state.adding;
 }
 function asBase64(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(new Error('อ่านไฟล์ไม่สำเร็จ'));reader.readAsDataURL(file);});}
 async function submitUpload(){
@@ -121,10 +149,10 @@ async function submitUpload(){
   state.busy=false;renderQueue();if(successes){toast('บันทึกสื่อแล้ว '+successes+' รายการ');await refresh();}
 }
 options($('subject-filter'),subjects);options($('grade-filter'),grades);
-for(const id of ['search','subject-filter','grade-filter','sort'])$(id).addEventListener(id==='search'?'input':'change',render);
-document.querySelectorAll('[data-category]').forEach(b=>b.addEventListener('click',()=>{state.category=b.dataset.category;document.querySelectorAll('[data-category]').forEach(x=>x.classList.toggle('active',x===b));render();}));
-document.querySelectorAll('.close-dialog').forEach(b=>b.addEventListener('click',()=>{if(b.closest('dialog').id==='upload-dialog'&&state.busy)return;b.closest('dialog').close();}));
-$('upload-dialog').addEventListener('cancel',e=>{if(state.busy)e.preventDefault();});
+for(const id of ['search','subject-filter','grade-filter','format-filter','sort'])$(id).addEventListener(id==='search'?'input':'change',()=>{state.page=0;render();});
+document.querySelectorAll('[data-category]').forEach(b=>b.addEventListener('click',()=>{state.category=b.dataset.category;state.page=0;document.querySelectorAll('[data-category]').forEach(x=>{x.classList.toggle('active',x.dataset.category===state.category);x.setAttribute('aria-pressed',String(x.dataset.category===state.category));});render();}));
+document.querySelectorAll('.close-dialog').forEach(b=>b.addEventListener('click',()=>{if(b.closest('dialog').id==='upload-dialog'&&(state.busy||state.adding))return;b.closest('dialog').close();}));
+$('upload-dialog').addEventListener('cancel',e=>{if(state.busy||state.adding)e.preventDefault();});
 $('upload-button').addEventListener('click',startUpload);
 $('welcome-connect').addEventListener('click',()=>state.status?.signedIn?startUpload():connect());
 $('sidebar-connect').addEventListener('click',()=>openDialog('setup-dialog'));
@@ -132,7 +160,7 @@ $('setup-nav').addEventListener('click',()=>openDialog('setup-dialog'));
 $('help').addEventListener('click',()=>openDialog('setup-dialog'));
 $('automation-nav').addEventListener('click',()=>openDialog('automation-dialog'));
 $('refresh').addEventListener('click',refresh);
-$('empty-action').addEventListener('click',()=>{if(state.readFailed)return refresh();if(!state.status?.signedIn)return connect();if(!state.files.length)return startUpload();$('search').value='';$('subject-filter').value='';$('grade-filter').value='';state.category='ทั้งหมด';document.querySelectorAll('[data-category]').forEach(x=>x.classList.toggle('active',x.dataset.category==='ทั้งหมด'));render();});
+$('empty-action').addEventListener('click',()=>{if(state.readFailed)return refresh();if(!state.status?.signedIn)return connect();if(!state.files.length)return startUpload();$('search').value='';$('subject-filter').value='';$('grade-filter').value='';$('format-filter').value='';state.page=0;state.category='ทั้งหมด';document.querySelectorAll('[data-category]').forEach(x=>x.classList.toggle('active',x.dataset.category==='ทั้งหมด'));render();});
 $('file-input').addEventListener('change',e=>addFiles(e.target.files));
 $('submit-upload').addEventListener('click',submitUpload);
 $('quick-drop').addEventListener('click',startUpload);

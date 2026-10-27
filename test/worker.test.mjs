@@ -58,6 +58,9 @@ test('Workers OAuth → persistent encrypted credentials → upload and retry ac
   assert.equal(listing.files[0].appProperties.subject,'คณิตศาสตร์');assert.equal(listing.files[0].appProperties.grade,'ป.3');
   assert.equal((await app.fetch(request('/api/classify',{method:'POST',cookie:session,origin:'https://evil.example',body:{name:'x'}}))).status,403);
   const classification=await app.fetch(request('/api/classify',{method:'POST',cookie:session,origin:env.BASE_URL,body:{name:'ภาษาไทย ป.2.pdf'}})).then(r=>r.json());assert.equal(classification.subject,'ภาษาไทย');
+  const analyzed=await app.fetch(request('/api/classify',{method:'POST',cookie:session,origin:env.BASE_URL,body:{name:'untitled.html',content_base64:Buffer.from('<h1>English worksheet Grade 4 Animals</h1>').toString('base64')}})).then(r=>r.json());
+  assert.equal(analyzed.title,'English worksheet Grade 4 Animals');assert.equal(analyzed.type,'ใบงาน');assert.equal(analyzed.analysis.source,'content');
+  assert.equal((await app.fetch(request('/api/classify',{method:'POST',cookie:session,origin:env.BASE_URL,body:{name:'bad.pdf',content_base64:'bad'}}))).status,400);
   assert.equal((await app.fetch(request('/api/logout',{method:'POST',cookie:session,origin:env.BASE_URL,body:{}}))).status,200);
   app=new LibraryApplication(ctx,env);assert.equal((await app.fetch(request('/api/files',{cookie:session}))).status,401);
   await storage.put('session:expired',{until:0,email:env.ADMIN_EMAIL});await app.alarm();assert.equal(await storage.get('session:expired'),undefined);
