@@ -1,3 +1,4 @@
+import { PUBLIC_ASSETS } from './public-assets.mjs';
 import http from 'node:http';
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
@@ -108,12 +109,12 @@ async function upload(input,requestId=null) {
   return drive('upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,size,createdTime,mimeType,appProperties',{method:'POST',headers:{'Content-Type':`multipart/related; boundary=${boundary}`},body:payload});
 }
 function enqueue(task) {const result=uploadQueue.then(task);uploadQueue=result.catch(()=>{});return result;}
-const allowedAssets={'/fonts/noto-sans-thai-thai.woff2':['fonts/noto-sans-thai-thai.woff2','font/woff2'],'/fonts/noto-sans-thai-latin.woff2':['fonts/noto-sans-thai-latin.woff2','font/woff2'],'/':['index.html','text/html; charset=utf-8'],'/app.js':['app.js','text/javascript; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8']};
+const allowedAssets=PUBLIC_ASSETS;
 const server=http.createServer(async(req,res)=>{
   try {
     const url=new URL(req.url,base), path=url.pathname;
-    if(req.method==='GET' && allowedAssets[path]) {
-      const [file,type]=allowedAssets[path];return send(res,200,await readFile(resolve(root,'public',file),type.startsWith('font/')?undefined:'utf8'),{'Content-Type':type,'Content-Security-Policy':"default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",'Referrer-Policy':'no-referrer'});
+    if(['GET','HEAD'].includes(req.method) && Object.hasOwn(allowedAssets,path)) {
+      const [file,type]=allowedAssets[path];return send(res,200,await readFile(resolve(root,'public',file),type.startsWith('text/')?'utf8':undefined),{'Content-Type':type,'Content-Security-Policy':"default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",'Referrer-Policy':'no-referrer'});
     }
     if(req.method==='GET' && path==='/api/status')return send(res,200,{configured,signedIn:!!session(req),connected:!!tokens?.refresh_token,email:session(req)?owner:null,subjects,types,actionsEnabled:actionKey.length>=32});
     if(req.method==='GET' && path==='/auth/google') {
