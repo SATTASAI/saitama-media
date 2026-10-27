@@ -1,4 +1,11 @@
 const $ = id => document.getElementById(id);
+const colorScheme=window.matchMedia('(prefers-color-scheme: dark)');
+let themePreference='system';try{themePreference=localStorage.getItem('kru-theme')||'system';}catch{}
+if(!['system','light','dark'].includes(themePreference))themePreference='system';
+function applyTheme(){document.documentElement.dataset.theme=themePreference==='system'?(colorScheme.matches?'dark':'light'):themePreference;}
+applyTheme();colorScheme.addEventListener('change',()=>{if(themePreference==='system')applyTheme();});
+$('theme-select').value=themePreference;
+$('theme-select').addEventListener('change',e=>{themePreference=e.target.value;try{localStorage.setItem('kru-theme',themePreference);}catch{}applyTheme();});
 const state = { status:null, files:[], category:'ทั้งหมด', queue:[], busy:false, loading:false, readFailed:false };
 const subjects = ['คณิตศาสตร์','ภาษาไทย','ภาษาอังกฤษ','วิทยาศาสตร์','สังคมศึกษา','ศิลปะ','สุขศึกษา','การงานอาชีพ','ทั่วไป'];
 const grades = ['อนุบาล',...Array.from({length:6},(_,i)=>`ป.${i+1}`),...Array.from({length:6},(_,i)=>`ม.${i+1}`),'ไม่ระบุชั้น'];
@@ -63,23 +70,26 @@ async function refresh(){
 }
 function startUpload(){if(!state.status?.signedIn)return connect();openDialog('upload-dialog');}
 async function addFiles(list){
-  if(state.busy)return;
-  for(const file of list){
-    if(file.size>15*1024*1024){toast(file.name+' มีขนาดเกิน 15 MB');continue;}
-    if(!/\.(pdf|docx|pptx|xlsx|png|jpe?g|webp|txt|md|html)$/i.test(file.name)){toast('ไม่รองรับไฟล์ '+file.name);continue;}
-    if(!file.size){toast('ไฟล์ '+file.name+' ว่างเปล่า');continue;}
+  if(state.busy||state.adding)return;
+  state.adding=true;renderQueue();const rejected=[];
+  for(const file of Array.from(list)){
+    if(state.queue.some(i=>i.file.name===file.name&&i.file.size===file.size&&i.file.lastModified===file.lastModified)){rejected.push(file.name+' อยู่ในรายการแล้ว');continue;}
+    if(file.size>15*1024*1024){rejected.push(file.name+' มีขนาดเกิน 15 MB');continue;}
+    if(!/\.(pdf|docx|pptx|xlsx|png|jpe?g|webp|txt|md|html)$/i.test(file.name)){rejected.push('ไม่รองรับไฟล์ '+file.name);continue;}
+    if(!file.size){rejected.push('ไฟล์ '+file.name+' ว่างเปล่า');continue;}
     try{
       const meta=await api('/api/classify',{name:file.name});
       state.queue.push({file,meta,id:crypto.randomUUID(),status:'พร้อมอัปโหลด',done:false,uncertain:false});
-    }catch(e){toast(e.message);}
+    }catch(e){rejected.push(file.name+': '+e.message);}
   }
+  state.adding=false;$('upload-error').hidden=!rejected.length;$('upload-error').textContent=rejected.join(' · ');
   renderQueue();$('file-input').value='';
 }
 function renderQueue(){
   $('upload-list').replaceChildren();
   for(const item of state.queue){
-    const row=el('div','upload-item'),heading=el('div','item-heading');heading.append(el('strong',null,item.file.name));
-    const remove=el('button',null,'นำออก');remove.disabled=state.busy;remove.type='button';remove.addEventListener('click',()=>{state.queue=state.queue.filter(x=>x!==item);renderQueue();});heading.append(remove);row.append(heading);
+    const row=el('div','upload-item'+(item.done?' is-done':item.uncertain?' is-uncertain':'')),heading=el('div','item-heading');heading.append(el('strong',null,item.file.name+' · '+(item.file.size/1024/1024).toFixed(2)+' MB'));
+    const remove=el('button',null,'นำออก');remove.disabled=state.busy||state.adding;remove.type='button';remove.addEventListener('click',()=>{state.queue=state.queue.filter(x=>x!==item);renderQueue();});heading.append(remove);row.append(heading);
     const fields=el('div','upload-fields');
     for(const [key,label,values] of [['title','ชื่อสื่อ',null],['subject','วิชา',subjects],['grade','ระดับชั้น',grades],['type','ประเภท',types]]){
       const wrap=el('label',key==='title'?'title-field':'',label),input=el(values?'select':'input');
@@ -89,9 +99,10 @@ function renderQueue(){
     }
     row.append(fields,el('p','upload-progress',item.status));$('upload-list').append(row);
   }
-  $('submit-upload').disabled=state.busy||!state.queue.some(i=>!i.done);
+  $('submit-upload').disabled=state.busy||state.adding||!state.queue.some(i=>!i.done);
   $('submit-upload').textContent=state.busy?'กำลังอัปโหลด…':'อัปโหลดเข้า Google Drive';
-  $('file-input').disabled=state.busy;$('cancel-upload').disabled=state.busy;
+  $('queue-summary').textContent=state.adding?'กำลังตรวจสอบไฟล์…':state.queue.length+' ไฟล์ · บันทึกแล้ว '+state.queue.filter(i=>i.done).length+' · รอส่ง '+state.queue.filter(i=>!i.done).length;
+  $('file-input').disabled=state.busy||state.adding;$('cancel-upload').disabled=state.busy;
   $('upload-dialog').querySelector('.dialog-heading .close-dialog').disabled=state.busy;
 }
 function asBase64(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(new Error('อ่านไฟล์ไม่สำเร็จ'));reader.readAsDataURL(file);});}
@@ -124,7 +135,16 @@ $('refresh').addEventListener('click',refresh);
 $('empty-action').addEventListener('click',()=>{if(state.readFailed)return refresh();if(!state.status?.signedIn)return connect();if(!state.files.length)return startUpload();$('search').value='';$('subject-filter').value='';$('grade-filter').value='';state.category='ทั้งหมด';document.querySelectorAll('[data-category]').forEach(x=>x.classList.toggle('active',x.dataset.category==='ทั้งหมด'));render();});
 $('file-input').addEventListener('change',e=>addFiles(e.target.files));
 $('submit-upload').addEventListener('click',submitUpload);
-for(const event of ['dragover','dragleave','drop'])$('dropzone').addEventListener(event,e=>{e.preventDefault();$('dropzone').classList.toggle('drag',event==='dragover');if(event==='drop')addFiles(e.dataTransfer.files);});
+$('quick-drop').addEventListener('click',startUpload);
+for(const target of [$('dropzone'),$('quick-drop')]){
+  let depth=0;
+  target.addEventListener('dragenter',e=>{e.preventDefault();depth++;target.classList.add('drag');});
+  target.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect=state.busy||state.adding?'none':'copy';});
+  target.addEventListener('dragleave',()=>{if(--depth<=0){depth=0;target.classList.remove('drag');}});
+  target.addEventListener('drop',e=>{e.preventDefault();depth=0;target.classList.remove('drag');if(state.busy||state.adding)return;if(!state.status?.signedIn){toast('กรุณาเชื่อม Google ก่อน แล้วลากไฟล์อีกครั้ง');connect();return;}openDialog('upload-dialog');addFiles(e.dataTransfer.files);});
+}
+// Avoid navigating away when a file is dropped outside the upload area.
+for(const event of ['dragover','drop'])window.addEventListener(event,e=>{if(e.dataTransfer?.types.includes('Files'))e.preventDefault();});
 $('schema-url').value=location.origin+'/openapi.json';
 $('copy-schema').addEventListener('click',async()=>{try{await navigator.clipboard.writeText($('schema-url').value);toast('คัดลอกลิงก์ OpenAPI แล้ว');}catch{toast('เลือกและคัดลอกลิงก์ในช่องได้เลย');}});
 $('logout').addEventListener('click',async()=>{try{await api('/api/logout',{});state.files=[];state.queue=[];renderQueue();$('setup-dialog').close();await refresh();}catch(e){toast(e.message);}});
