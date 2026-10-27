@@ -3,7 +3,7 @@ import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, createCipheriv, createDecipheriv, timingSafeEqual, createHash } from 'node:crypto';
-import { classify, fileName, parseUpload, subjects, types } from './library.mjs';
+import { analyzeFile, fileName, parseUpload, subjects, types } from './library.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT || 3000);
@@ -26,7 +26,7 @@ cleanup.unref();
 
 function send(res,status,data,headers={}) {
   res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...headers});
-  res.end(typeof data === 'string' ? data : JSON.stringify(data));
+  res.end(typeof data === 'string' || Buffer.isBuffer(data) ? data : JSON.stringify(data));
 }
 function cookie(name,value,maxAge) {return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure?'; Secure':''}`;}
 function cookies(req) {return Object.fromEntries((req.headers.cookie || '').split(';').map(s=>s.trim().split('=')).filter(p=>p.length===2));}
@@ -108,12 +108,12 @@ async function upload(input,requestId=null) {
   return drive('upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,size,createdTime,mimeType,appProperties',{method:'POST',headers:{'Content-Type':`multipart/related; boundary=${boundary}`},body:payload});
 }
 function enqueue(task) {const result=uploadQueue.then(task);uploadQueue=result.catch(()=>{});return result;}
-const allowedAssets={'/':['index.html','text/html; charset=utf-8'],'/app.js':['app.js','text/javascript; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8']};
+const allowedAssets={'/fonts/noto-sans-thai-thai.woff2':['fonts/noto-sans-thai-thai.woff2','font/woff2'],'/fonts/noto-sans-thai-latin.woff2':['fonts/noto-sans-thai-latin.woff2','font/woff2'],'/':['index.html','text/html; charset=utf-8'],'/app.js':['app.js','text/javascript; charset=utf-8'],'/style.css':['style.css','text/css; charset=utf-8']};
 const server=http.createServer(async(req,res)=>{
   try {
     const url=new URL(req.url,base), path=url.pathname;
     if(req.method==='GET' && allowedAssets[path]) {
-      const [file,type]=allowedAssets[path];return send(res,200,await readFile(resolve(root,'public',file),'utf8'),{'Content-Type':type,'Content-Security-Policy':"default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",'Referrer-Policy':'no-referrer'});
+      const [file,type]=allowedAssets[path];return send(res,200,await readFile(resolve(root,'public',file),type.startsWith('font/')?undefined:'utf8'),{'Content-Type':type,'Content-Security-Policy':"default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",'Referrer-Policy':'no-referrer'});
     }
     if(req.method==='GET' && path==='/api/status')return send(res,200,{configured,signedIn:!!session(req),connected:!!tokens?.refresh_token,email:session(req)?owner:null,subjects,types,actionsEnabled:actionKey.length>=32});
     if(req.method==='GET' && path==='/auth/google') {
@@ -154,7 +154,7 @@ const server=http.createServer(async(req,res)=>{
       if(!session(req))throw problem('กรุณาเข้าสู่ระบบด้วย Google ก่อน',401);
       if(req.method==='POST' && req.headers.origin!==base)throw problem('Origin ไม่ถูกต้อง',403);
       if(req.method==='GET' && path==='/api/files')return send(res,200,{files:await listFiles()});
-      if(req.method==='POST' && path==='/api/classify') {const d=await body(req);if(typeof d.name!=='string')throw problem('ชื่อไฟล์ไม่ถูกต้อง');return send(res,200,classify(d.name));}
+      if(req.method==='POST' && path==='/api/classify') {const d=await body(req);if(!d||typeof d.name!=='string')throw problem('ชื่อไฟล์ไม่ถูกต้อง');try{return send(res,200,analyzeFile(d));}catch(e){throw problem(e.message);}}
       if(req.method==='POST' && path==='/api/upload') {const d=await body(req);if(typeof d.request_id!=='string'||!/^[a-zA-Z0-9_-]{16,80}$/.test(d.request_id))throw problem('request_id ไม่ถูกต้อง');return send(res,201,{file:await enqueue(()=>upload(d,d.request_id))});}
       if(req.method==='POST' && path==='/api/logout') {sessions.delete(cookies(req).kru_session);return send(res,200,{ok:true},{'Set-Cookie':cookie('kru_session','',0)});}
     }

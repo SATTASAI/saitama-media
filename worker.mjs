@@ -19,7 +19,7 @@ export default {
         const forwarded=request.body?new Request(request,{body:JSON.stringify(await readBody(request))}):request;
         return env.LIBRARY.get(env.LIBRARY.idFromName('owner-library-v1')).fetch(forwarded);
       }
-      if(['GET','HEAD'].includes(request.method)&&['/','/index.html','/app.js','/style.css'].includes(path)) {
+      if(['GET','HEAD'].includes(request.method)&&['/','/index.html','/app.js','/style.css','/fonts/noto-sans-thai-thai.woff2','/fonts/noto-sans-thai-latin.woff2'].includes(path)) {
         const response=await env.ASSETS.fetch(request);const headers=new Headers(response.headers);
         headers.set('Content-Security-Policy',"default-src 'self'; style-src 'self'; font-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");headers.set('X-Content-Type-Options','nosniff');headers.set('Referrer-Policy','no-referrer');headers.set('Cache-Control','no-store');return new Response(response.body,{status:response.status,headers});
       }

@@ -28,6 +28,7 @@ test('ป้องกันการอ่าน/เขียนโดยไม�
   assert.equal((await fetch(origin+'/oauth/callback?state=forged&code=fake')).status,403);
   const response=await fetch(origin+'/');const html=await response.text();
   assert.equal(response.status,200);assert.ok(response.headers.get('content-security-policy').includes("frame-ancestors 'none'"));assert.ok(!html.includes(key));
+  const font=await fetch(origin+'/fonts/noto-sans-thai-thai.woff2');assert.equal(font.headers.get('content-type'),'font/woff2');assert.equal(Buffer.from(await font.arrayBuffer()).subarray(0,4).toString(),'wOF2');
   const schema=await fetch(origin+'/openapi.json').then(r=>r.json());assert.equal(schema.servers[0].url,origin);assert.ok(!JSON.stringify(schema).includes(key));
   assert.equal((await fetch(origin+'/.env')).status,404);
   assert.equal((await fetch(origin+'/data/google.enc')).status,404);
