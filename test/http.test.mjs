@@ -29,6 +29,13 @@ test('ป้องกันการอ่าน/เขียนโดยไม�
   const response=await fetch(origin+'/');const html=await response.text();
   assert.equal(response.status,200);assert.ok(response.headers.get('content-security-policy').includes("frame-ancestors 'none'"));assert.ok(!html.includes(key));
   const font=await fetch(origin+'/fonts/noto-sans-thai-thai.woff2');assert.equal(font.headers.get('content-type'),'font/woff2');assert.equal(Buffer.from(await font.arrayBuffer()).subarray(0,4).toString(),'wOF2');
+  for(const [path,mime,signature] of [['/fonts/lora-latin-600.woff2','font/woff2','wOF2'],['/assets/cover-animals.webp','image/webp','RIFF'],['/assets/brand-mark.png','image/png',null],['/icons/upload-simple.svg','image/svg+xml',null]]){
+    const asset=await fetch(origin+path);assert.equal(asset.status,200);assert.equal(asset.headers.get('content-type'),mime);
+    const bytes=Buffer.from(await asset.arrayBuffer());assert.ok(bytes.length>100);if(signature)assert.equal(bytes.subarray(0,4).toString(),signature);
+    if(path.endsWith('.png'))assert.equal(bytes.subarray(1,4).toString(),'PNG');
+    const head=await fetch(origin+path,{method:'HEAD'});assert.equal(head.status,200);assert.equal((await head.arrayBuffer()).byteLength,0);
+  }
+  for(const path of ['/public-assets.mjs','/server.mjs','/icons/unknown.svg','/assets/unknown.webp'])assert.equal((await fetch(origin+path)).status,404);
   const schema=await fetch(origin+'/openapi.json').then(r=>r.json());assert.equal(schema.servers[0].url,origin);assert.ok(!JSON.stringify(schema).includes(key));
   assert.equal((await fetch(origin+'/.env')).status,404);
   assert.equal((await fetch(origin+'/data/google.enc')).status,404);
